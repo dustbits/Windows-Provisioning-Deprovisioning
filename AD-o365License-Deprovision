@@ -1,0 +1,89 @@
+                                                      # Offboarding script for AD & o365 #
+
+
+                                                                  ## FUNCTIONS ##
+
+## This script deprovisions AD and removes all o365 licenses assigned to the user ##
+
+                                                               ## REQUIREMENTS ##
+
+## -For this script you will need PS version 5.1, AD Module, and MSOnline Module installed in your server 
+## -This script iterates a csv with three columns, UPN | First Name | Last Name 
+
+
+# Import Active Directory module
+Import-Module ActiveDirectory
+Import-Module MSOnline
+
+Connect-MsolService
+
+# Open file dialog
+# Load Windows Forms
+[System.Reflection.Assembly]::LoadWithPartialName("System.windows.forms") | Out-Null
+
+# Create and show open file dialog
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.InitialDirectory = $StartDir
+$dialog.Filter = "CSV (*.csv)| *.csv" 
+$dialog.ShowDialog() | Out-Null
+
+# Get file path
+$CSVFile = $dialog.FileName
+
+# Import file into variable
+# Lets make sure the file path was valid
+# If the file path is not valid, then exit the script
+if ([System.IO.File]::Exists($CSVFile)) {
+    Write-Host "Importing CSV..."
+    $CSV = Import-Csv -LiteralPath "$CSVFile"
+} else {
+    Write-Host "File path specified was not valid"
+    Exit
+}
+
+# Lets iterate over each line in the CSV file
+
+foreach($user in $CSV) {
+
+#  Get date/time
+$Timestamp = Get-Date
+
+#  Format username, in my case my username format is first initial + last name. If you remove the ) after first name it will change the format to first.last
+
+$Username = "$($User.'First Name'[0]) $($User.'Last Name')"
+$Username = $Username.Replace(" ", "")
+$Upn = Get-ADUser -identity $Username | select-object -expand UserPrincipalName
+
+#  Disable AD account
+Disable-ADAccount -Identity $Username
+
+
+#  Timestamp termination details, add your initials after by or your name
+Set-ADUser -Identity $Username -desc "Disabled on $Timestamp by "
+
+
+#  Query AD groups
+$ADgroups = Get-ADPrincipalGroupMembership -Identity $Username | where {$_.Name -ne "Domain Users"}
+
+
+#  Remove AD groups but domain user
+Remove-ADPrincipalGroupMembership -Identity "$Username" -MemberOf $ADgroups -Confirm:$false
+
+
+#  Move to Disabled OU
+Get-ADUser $Username | Move-ADObject -TargetPath 'OU=Disabled,OU=Users,DC=Contoso,DC=local'
+
+
+## Remove all office 365 licenses ##
+
+(Get-Msoluser -UserPrincipalName $Upn).licenses.accountskuid |
+foreach{
+
+    Set-MsolUserLicense -UserPrincipalName $Upn -RemoveLicenses $_
+}
+}
+
+
+   
+   
+ 
